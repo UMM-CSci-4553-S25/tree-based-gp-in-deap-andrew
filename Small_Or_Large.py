@@ -8,6 +8,8 @@ from deap import gp
 from deap import tools
 from deap import algorithms
 
+NUM_RUNS = 20
+
 # Protected division to avoid divide-by-zero errors in evolved expressions
 def protected_div(a, b):
     return a / b if b != 0 else 1  # Avoid zero division
@@ -103,30 +105,47 @@ toolbox.register("mutate", gp.mutUniform, expr=toolbox.expr, pset=pset)
 toolbox.decorate("mate", gp.staticLimit(key=len, max_value=17))
 toolbox.decorate("mutate", gp.staticLimit(key=len, max_value=17))
 
-
-def main():
-    random.seed(42) # Reproducibility
-    pop = toolbox.population(n=100)  # Initial population
-    hof = tools.HallOfFame(1)  # Best individual tracker
+def run_single_gp(seed_value):
+    random.seed(seed_value)
+    pop = toolbox.population(n=100)
+    hof = tools.HallOfFame(1)
     stats = tools.Statistics(lambda ind: ind.fitness.values[0])
     stats.register("avg", np.mean)
     stats.register("min", np.min)
 
-    # Run evolutionary algorithm for 60 generations
     pop, log = algorithms.eaSimple(pop, toolbox,
                                    cxpb=0.5, mutpb=0.2,
                                    ngen=60, stats=stats,
-                                   halloffame=hof, verbose=True)
+                                   halloffame=hof, verbose=False)
 
-    # Display best evolved program
-    print("\nBest individual:", hof[0])
+    best_fitness = hof[0].fitness.values[0]
+    avg_fitness = log[-1]['avg']
+    size = len(hof[0])
+    return best_fitness, avg_fitness, size, hof[0], log
 
-    # Display best performance
-    print("Fitness (total errors):", hof[0].fitness.values[0])
+def main():
+    results = []
+    logs = []  # Store logs for each run
+    best_run_index = None
+    best_run_fitness = float("inf")
 
-    # Display the predicted output and expected output
-    func = toolbox.compile(expr=hof[0])
-    print("\n Input → Predicted → Expected")
+    for run in range(NUM_RUNS):
+        best_fit, avg_fit, size, best_ind, log = run_single_gp(seed_value=run)
+        results.append((run + 1, best_fit, avg_fit, size, best_ind, log))
+        logs.append(log)
+
+        if best_fit < best_run_fitness:
+            best_run_fitness = best_fit
+            best_run_index = run
+
+        print(f"Run {run + 1}: Best Fit = {best_fit}, Avg Fit = {avg_fit:.2f}, Size = {size}")
+
+    # Extract best run info
+    run_id, best_fit, avg_fit, size, best_ind, best_log = results[best_run_index]
+
+    print(f"\n🏆 Best individual (Run {run_id}): {best_ind}")
+    func = toolbox.compile(expr=best_ind)
+    print("Input → Predicted → Expected")
     for x, expected in train_data:
         if expected is None:
             print(f"{x:>5} →  Middle Zone → Middle Zone")
@@ -139,13 +158,19 @@ def main():
         except Exception as e:
             print(f"{x:>5} →     ERROR     → {expected_str}  (Reason: {e})")
 
-    # Plotting fitness over generations
-    gen = log.select("gen")
-    min_fit = log.select("min")
-    plt.plot(gen, min_fit, label="Best Fitness (Lower is Better)")
+    # Summary Table
+    print("\n=== Summary Table ===")
+    print("Run | Best Fit | Avg Fit | Size")
+    for run, best, avg, size, *_ in results:
+        print(f"{run:>3} | {best:>8} | {avg:>8.2f} | {size}")
+
+    # Plot best run's generation-wise performance
+    gen = best_log.select("gen")
+    min_fit = best_log.select("min")
+    plt.plot(gen, min_fit, label=f"Best Fitness (Run {run_id})")
     plt.xlabel("Generation")
     plt.ylabel("Errors")
-    plt.title("GP Solving 'Small or Large'")
+    plt.title("Fitness over Generations (Best Run)")
     plt.grid(True)
     plt.legend()
     plt.show()
